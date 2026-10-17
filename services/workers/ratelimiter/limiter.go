@@ -10,12 +10,12 @@ type Limiter struct {
 	lim *rate.Limiter
 }
 
-func Newl(rps float64) *Limiter {
+func New(rps float64) *Limiter {
 	burst := int(rps / 10)
 	if burst < 1 {
 		burst = 1
 	}
-	return &Limiter{lim: rate.NewLimiter(rate.Limit(rps))}
+	return &Limiter{lim: rate.NewLimiter(rate.Limit(rps), burst)}
 }
 
 func (l *Limiter) Wait(ctx context.Context) error {

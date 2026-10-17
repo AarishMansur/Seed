@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,11 +13,26 @@ import (
 
 	"github.com/AarishMansur/services/workers/channel"
 	"github.com/AarishMansur/services/workers/client"
+	"github.com/AarishMansur/services/workers/ratelimiter"
 	"github.com/AarishMansur/services/workers/runner"
 )
 
 func main() {
-	fmt.Println("--- Starting Day 2 High-Throughput HTTP Load Engine ---")
+	profileName := flag.String("profile", "constant", "traffic profile: constant | ramp | spike")
+	targetRPS := flag.Float64("rps", 500, "target RPS for constant profile")
+	flag.Parse()
+
+	var profile ratelimiter.Profile
+	switch *profileName {
+	case "ramp":
+		profile = ratelimiter.Ramp{From: 100, To: 2000, Over: 30 * time.Second}
+	case "spike":
+		profile = ratelimiter.Spike{Base: 200, Peak: 2000, Period: 10 * time.Second, PeakFor: 2 * time.Second}
+	default:
+		profile = ratelimiter.Constant{RPSValue: *targetRPS}
+	}
+
+	fmt.Printf("--- Starting Day 3 Rate-Limited Load Engine [profile=%s] ---\n", *profileName)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -38,6 +54,9 @@ func main() {
 		},
 	}
 
+	lim := ratelimiter.New(profile.RPS(0))
+	go ratelimiter.Run(ctx, lim, profile)
+
 	go func() {
 		for {
 			select {
@@ -45,6 +64,10 @@ func main() {
 				close(pool.JobChan)
 				return
 			default:
+				if err := lim.Wait(ctx); err != nil {
+					close(pool.JobChan)
+					return
+				}
 				pool.Submit(targetJob)
 			}
 		}
